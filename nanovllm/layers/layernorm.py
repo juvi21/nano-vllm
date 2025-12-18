@@ -1,6 +1,12 @@
 import torch
 from torch import nn
 
+try:
+    from flashinfer import fused_add_rmsnorm, rmsnorm
+except Exception:  # pragma: no cover
+    fused_add_rmsnorm = None
+    rmsnorm = None
+
 
 class RMSNorm(nn.Module):
 
@@ -13,38 +19,35 @@ class RMSNorm(nn.Module):
         self.eps = eps
         self.weight = nn.Parameter(torch.ones(hidden_size))
 
-    @torch.compile
-    def rms_forward(
-        self,
-        x: torch.Tensor,
-    ) -> torch.Tensor:
-        orig_dtype = x.dtype
-        x = x.float()
-        var = x.pow(2).mean(dim=-1, keepdim=True)
-        x.mul_(torch.rsqrt(var + self.eps))
-        x = x.to(orig_dtype).mul_(self.weight)
-        return x
-
-    @torch.compile
-    def add_rms_forward(
-        self,
-        x: torch.Tensor,
-        residual: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor]:
-        orig_dtype = x.dtype
-        x = x.float().add_(residual.float())
-        residual = x.to(orig_dtype)
-        var = x.pow(2).mean(dim=-1, keepdim=True)
-        x.mul_(torch.rsqrt(var + self.eps))
-        x = x.to(orig_dtype).mul_(self.weight)
-        return x, residual
-
     def forward(
         self,
         x: torch.Tensor,
         residual: torch.Tensor | None = None,
     ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
+        use_flashinfer = (
+            rmsnorm is not None
+            and x.is_cuda
+            and x.dtype in {torch.float16, torch.bfloat16}
+            and self.weight.dtype == x.dtype
+        )
+        if use_flashinfer:
+            if residual is None:
+                return rmsnorm(x, self.weight, self.eps)
+            if fused_add_rmsnorm is not None and x.ndim == 2 and residual.ndim == 2:
+                fused_add_rmsnorm(x, residual, self.weight, self.eps)
+                return x, residual
+            residual_out = residual + x
+            return rmsnorm(residual_out, self.weight, self.eps), residual_out
+
+        orig_dtype = x.dtype
         if residual is None:
-            return self.rms_forward(x)
-        else:
-            return self.add_rms_forward(x, residual)
+            x_f = x.float()
+            var = x_f.pow(2).mean(dim=-1, keepdim=True)
+            x_f.mul_(torch.rsqrt(var + self.eps))
+            return x_f.to(orig_dtype).mul_(self.weight)
+
+        x_f = x.float().add_(residual.float())
+        residual_out = x_f.to(orig_dtype)
+        var = x_f.pow(2).mean(dim=-1, keepdim=True)
+        x_f.mul_(torch.rsqrt(var + self.eps))
+        return x_f.to(orig_dtype).mul_(self.weight), residual_out

@@ -31,9 +31,15 @@ class ModelRunner:
         self.model = Qwen3ForCausalLM(hf_config)
         load_model(self.model, config.model)
         self.sampler = Sampler()
+        if config.fp8_mlp:
+            self.enable_fp8_mlp()
         self.warmup_model()
         self.allocate_kv_cache()
-        if not self.enforce_eager:
+        use_flashinfer = (
+            config.attn_backend == "flashinfer"
+            or (config.attn_backend == "auto" and torch.cuda.get_device_capability(rank)[0] >= 10)
+        )
+        if not self.enforce_eager and not use_flashinfer:
             self.capture_cudagraph()
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
@@ -53,7 +59,7 @@ class ModelRunner:
             dist.barrier()
             if self.rank == 0:
                 self.shm.unlink()
-        if not self.enforce_eager:
+        if not self.enforce_eager and hasattr(self, "graphs"):
             del self.graphs, self.graph_pool
         torch.cuda.synchronize()
         dist.destroy_process_group()
@@ -87,6 +93,13 @@ class ModelRunner:
             self.write_shm(method_name, *args)
         method = getattr(self, method_name, None)
         return method(*args)
+
+    def enable_fp8_mlp(self):
+        # Match Qwen-style module naming: *.mlp.(gate_up_proj|down_proj)
+        for name, module in self.model.named_modules():
+            if name.endswith(".mlp.gate_up_proj") or name.endswith(".mlp.down_proj"):
+                if hasattr(module, "enable_fp8"):
+                    module.enable_fp8()
 
     def warmup_model(self):
         torch.cuda.empty_cache()
@@ -132,6 +145,14 @@ class ModelRunner:
         max_seqlen_k = 0
         slot_mapping = []
         block_tables = None
+
+        # FlashInfer paged-kv metadata (page indices are kv-cache blocks)
+        fi_seq_lens = []
+        fi_seq_lens_q = []
+        fi_kv_indptr = [0]
+        fi_kv_indices = []
+        fi_kv_last_page_len = []
+
         for seq in seqs:
             seqlen = len(seq)
             input_ids.extend(seq[seq.num_cached_tokens:])
@@ -142,6 +163,15 @@ class ModelRunner:
             cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
             max_seqlen_q = max(seqlen_q, max_seqlen_q)
             max_seqlen_k = max(seqlen_k, max_seqlen_k)
+
+            # FlashInfer: block-level paged-kv indptr/indices
+            fi_seq_lens.append(seqlen_k)
+            fi_seq_lens_q.append(seqlen_q)
+            n_pages = len(seq.block_table)
+            fi_kv_indptr.append(fi_kv_indptr[-1] + n_pages)
+            fi_kv_indices.extend(seq.block_table)
+            fi_kv_last_page_len.append(seq.last_block_num_tokens if n_pages > 0 else 0)
+
             if not seq.block_table:    # warmup
                 continue
             for i in range(seq.num_cached_blocks, seq.num_blocks):
@@ -155,28 +185,107 @@ class ModelRunner:
             block_tables = self.prepare_block_tables(seqs)
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-        cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+
+        cu_seqlens_q_cpu = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True)
+        cu_seqlens_k_cpu = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True)
+        cu_seqlens_q = cu_seqlens_q_cpu.cuda(non_blocking=True)
+        cu_seqlens_k = cu_seqlens_k_cpu.cuda(non_blocking=True)
+
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
+
+        fi_qo_indptr = cu_seqlens_q_cpu
+        fi_kv_indptr = torch.tensor(fi_kv_indptr, dtype=torch.int32, pin_memory=True)
+        fi_kv_indices = torch.tensor(fi_kv_indices, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+        fi_kv_last_page_len = torch.tensor(fi_kv_last_page_len, dtype=torch.int32, pin_memory=True)
+        fi_seq_lens = torch.tensor(fi_seq_lens, dtype=torch.int32, pin_memory=True)
+        fi_seq_lens_q = torch.tensor(fi_seq_lens_q, dtype=torch.int32, pin_memory=True)
+
+        set_context(
+            True,
+            cu_seqlens_q,
+            cu_seqlens_k,
+            max_seqlen_q,
+            max_seqlen_k,
+            slot_mapping,
+            None,
+            block_tables,
+            attn_backend=self.config.attn_backend,
+            fi_qo_indptr=fi_qo_indptr,
+            fi_kv_indptr=fi_kv_indptr,
+            fi_kv_indices=fi_kv_indices,
+            fi_kv_last_page_len=fi_kv_last_page_len,
+            fi_seq_lens=fi_seq_lens,
+            fi_seq_lens_q=fi_seq_lens_q,
+        )
         return input_ids, positions
 
     def prepare_decode(self, seqs: list[Sequence]):
+        use_flashinfer = (
+            self.config.attn_backend == "flashinfer"
+            or (self.config.attn_backend == "auto" and torch.cuda.get_device_capability(self.rank)[0] >= 10)
+        )
+
         input_ids = []
         positions = []
         slot_mapping = []
-        context_lens = []
+        context_lens = [] if not use_flashinfer else None
+
+        fi_seq_lens = [] if use_flashinfer else None
+        fi_kv_indptr = [0] if use_flashinfer else None
+        fi_kv_indices = [] if use_flashinfer else None
+        fi_kv_last_page_len = [] if use_flashinfer else None
+
         for seq in seqs:
             input_ids.append(seq.last_token)
             positions.append(len(seq) - 1)
-            context_lens.append(len(seq))
             slot_mapping.append(seq.block_table[-1] * self.block_size + seq.last_block_num_tokens  - 1)
+            if use_flashinfer:
+                seqlen_k = len(seq)
+                fi_seq_lens.append(seqlen_k)
+                n_pages = len(seq.block_table)
+                fi_kv_indptr.append(fi_kv_indptr[-1] + n_pages)
+                fi_kv_indices.extend(seq.block_table)
+                fi_kv_last_page_len.append(seq.last_block_num_tokens if n_pages > 0 else 0)
+            else:
+                assert context_lens is not None
+                context_lens.append(len(seq))
         input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
         slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-        block_tables = self.prepare_block_tables(seqs)
-        set_context(False, slot_mapping=slot_mapping, context_lens=context_lens, block_tables=block_tables)
+        if use_flashinfer:
+            context_lens = None
+            block_tables = None
+        else:
+            assert context_lens is not None
+            context_lens = torch.tensor(context_lens, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+            block_tables = self.prepare_block_tables(seqs)
+
+        if use_flashinfer:
+            assert fi_kv_indptr is not None
+            assert fi_kv_indices is not None
+            assert fi_kv_last_page_len is not None
+            assert fi_seq_lens is not None
+            fi_kv_indptr = torch.tensor(fi_kv_indptr, dtype=torch.int32, pin_memory=True)
+            fi_kv_indices = torch.tensor(fi_kv_indices, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+            fi_kv_last_page_len = torch.tensor(fi_kv_last_page_len, dtype=torch.int32, pin_memory=True)
+            fi_seq_lens = torch.tensor(fi_seq_lens, dtype=torch.int32, pin_memory=True)
+        else:
+            fi_kv_indptr = None
+            fi_kv_indices = None
+            fi_kv_last_page_len = None
+            fi_seq_lens = None
+
+        set_context(
+            False,
+            slot_mapping=slot_mapping,
+            context_lens=context_lens,
+            block_tables=block_tables,
+            attn_backend=self.config.attn_backend,
+            fi_kv_indptr=fi_kv_indptr,
+            fi_kv_indices=fi_kv_indices,
+            fi_kv_last_page_len=fi_kv_last_page_len,
+            fi_seq_lens=fi_seq_lens,
+        )
         return input_ids, positions
 
     def prepare_sample(self, seqs: list[Sequence]):
@@ -188,7 +297,7 @@ class ModelRunner:
 
     @torch.inference_mode()
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
-        if is_prefill or self.enforce_eager or input_ids.size(0) > 512:
+        if is_prefill or self.enforce_eager or not hasattr(self, "graphs") or input_ids.size(0) > 512:
             return self.model.compute_logits(self.model(input_ids, positions))
         else:
             bs = input_ids.size(0)

@@ -2,6 +2,11 @@ from functools import lru_cache
 import torch
 from torch import nn
 
+try:
+    from flashinfer import apply_rope_with_cos_sin_cache_inplace
+except Exception:  # pragma: no cover
+    apply_rope_with_cos_sin_cache_inplace = None
+
 
 def apply_rotary_emb(
     x: torch.Tensor,
@@ -31,18 +36,29 @@ class RotaryEmbedding(nn.Module):
         freqs = torch.einsum("i,j -> ij", t, inv_freq)
         cos = freqs.cos()
         sin = freqs.sin()
-        cache = torch.cat((cos, sin), dim=-1).unsqueeze_(1)
+        cache = torch.cat((cos, sin), dim=-1)  # [max_position, head_size], fp32
         self.register_buffer("cos_sin_cache", cache, persistent=False)
 
-    @torch.compile
     def forward(
         self,
         positions: torch.Tensor,
         query: torch.Tensor,
         key: torch.Tensor,
     ) -> tuple[torch.Tensor, torch.Tensor]:
+        if apply_rope_with_cos_sin_cache_inplace is not None and query.is_cuda and key.is_cuda:
+            apply_rope_with_cos_sin_cache_inplace(
+                positions=positions,
+                query=query,
+                key=key,
+                head_size=self.head_size,
+                cos_sin_cache=self.cos_sin_cache,
+            )
+            return query, key
+
         cos_sin = self.cos_sin_cache[positions]
         cos, sin = cos_sin.chunk(2, dim=-1)
+        cos = cos.unsqueeze(1)
+        sin = sin.unsqueeze(1)
         query = apply_rotary_emb(query, cos, sin)
         key = apply_rotary_emb(key, cos, sin)
         return query, key

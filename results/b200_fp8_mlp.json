@@ -1,0 +1,33 @@
+{
+  "env": {
+    "torch_version": "2.9.1+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "enforce_eager": false,
+    "attn_backend": "flashinfer",
+    "fp8_mlp": true,
+    "seed": 0
+  },
+  "results": {
+    "prefill_tokens": 262400,
+    "prefill_time_s": 0.8661338199945021,
+    "prefill_tok_s": 302955.4948006367,
+    "decode_tokens": 130816,
+    "decode_time_s": 15.619191225992836,
+    "decode_tok_s": 8375.337628385087,
+    "total_time_s": 16.48744849600007,
+    "total_tok_s": 23849.414910705924
+  }
+}
