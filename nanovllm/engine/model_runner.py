@@ -35,11 +35,11 @@ class ModelRunner:
             self.enable_fp8_mlp()
         self.warmup_model()
         self.allocate_kv_cache()
-        use_flashinfer = (
+        self.use_flashinfer = (
             config.attn_backend == "flashinfer"
             or (config.attn_backend == "auto" and torch.cuda.get_device_capability(rank)[0] >= 10)
         )
-        if not self.enforce_eager and not use_flashinfer:
+        if not self.enforce_eager:
             self.capture_cudagraph()
         torch.set_default_device("cpu")
         torch.set_default_dtype(default_dtype)
@@ -299,20 +299,59 @@ class ModelRunner:
     def run_model(self, input_ids: torch.Tensor, positions: torch.Tensor, is_prefill: bool):
         if is_prefill or self.enforce_eager or not hasattr(self, "graphs") or input_ids.size(0) > 512:
             return self.model.compute_logits(self.model(input_ids, positions))
+
+        bs = input_ids.size(0)
+        context = get_context()
+        graph_bs = next(x for x in self.graph_bs if x >= bs)
+        graph = self.graphs[graph_bs]
+        graph_vars = self.graph_vars
+
+        graph_vars["input_ids"][:bs] = input_ids
+        graph_vars["positions"][:bs] = positions
+
+        if context.slot_mapping is None:
+            raise RuntimeError("slot_mapping must be set for cudagraph decode.")
+        graph_vars["slot_mapping"].fill_(-1)
+        graph_vars["slot_mapping"][:bs] = context.slot_mapping
+
+        if getattr(self, "graph_use_flashinfer", False):
+            if (
+                context.fi_kv_indptr is None
+                or context.fi_kv_indices is None
+                or context.fi_kv_last_page_len is None
+            ):
+                raise RuntimeError("FlashInfer metadata must be set for cudagraph decode.")
+            if "fi_kv_indptr" not in graph_vars:
+                raise RuntimeError("FlashInfer cudagraph buffers were not captured.")
+
+            fi_kv_indptr_cpu = context.fi_kv_indptr
+            fi_kv_last_page_len_cpu = context.fi_kv_last_page_len
+            fi_kv_indices_gpu = context.fi_kv_indices
+
+            total_pages = int(fi_kv_indptr_cpu[-1])
+            pad = graph_bs - bs
+
+            graph_vars["fi_kv_indptr"][: bs + 1].copy_(fi_kv_indptr_cpu, non_blocking=True)
+            if pad:
+                tail = torch.arange(1, pad + 1, dtype=torch.int32, device=input_ids.device).add_(total_pages)
+                graph_vars["fi_kv_indptr"][bs + 1 : graph_bs + 1].copy_(tail)
+            graph_vars["fi_kv_last_page_len"][:bs].copy_(fi_kv_last_page_len_cpu, non_blocking=True)
+            if pad:
+                graph_vars["fi_kv_last_page_len"][bs:graph_bs].fill_(1)
+
+            graph_vars["fi_kv_indices"][:total_pages].copy_(fi_kv_indices_gpu, non_blocking=True)
+            if pad:
+                graph_vars["fi_kv_indices"][total_pages : total_pages + pad].zero_()
+
         else:
-            bs = input_ids.size(0)
-            context = get_context()
-            graph = self.graphs[next(x for x in self.graph_bs if x >= bs)]
-            graph_vars = self.graph_vars
-            graph_vars["input_ids"][:bs] = input_ids
-            graph_vars["positions"][:bs] = positions
-            graph_vars["slot_mapping"].fill_(-1)
-            graph_vars["slot_mapping"][:bs] = context.slot_mapping
+            if context.context_lens is None or context.block_tables is None:
+                raise RuntimeError("context_lens and block_tables must be set for cudagraph decode.")
             graph_vars["context_lens"].zero_()
             graph_vars["context_lens"][:bs] = context.context_lens
-            graph_vars["block_tables"][:bs, :context.block_tables.size(1)] = context.block_tables
-            graph.replay()
-            return self.model.compute_logits(graph_vars["outputs"][:bs])
+            graph_vars["block_tables"][:bs, : context.block_tables.size(1)] = context.block_tables
+
+        graph.replay()
+        return self.model.compute_logits(graph_vars["outputs"][:bs])
 
     def run(self, seqs: list[Sequence], is_prefill: bool) -> list[int]:
         input_ids, positions = self.prepare_prefill(seqs) if is_prefill else self.prepare_decode(seqs)
@@ -330,7 +369,7 @@ class ModelRunner:
         max_num_blocks = (config.max_model_len + self.block_size - 1) // self.block_size
         input_ids = torch.zeros(max_bs, dtype=torch.int64)
         positions = torch.zeros(max_bs, dtype=torch.int64)
-        slot_mapping = torch.zeros(max_bs, dtype=torch.int32)
+        slot_mapping = torch.full((max_bs,), -1, dtype=torch.int32)
         context_lens = torch.zeros(max_bs, dtype=torch.int32)
         block_tables = torch.zeros(max_bs, max_num_blocks, dtype=torch.int32)
         outputs = torch.zeros(max_bs, hf_config.hidden_size)
@@ -338,9 +377,138 @@ class ModelRunner:
         self.graphs = {}
         self.graph_pool = None
 
+        use_flashinfer = getattr(self, "use_flashinfer", False)
+        self.graph_use_flashinfer = use_flashinfer
+
+        if use_flashinfer:
+            try:
+                from flashinfer import CUDAGraphBatchDecodeWithPagedKVCacheWrapper
+            except Exception as e:  # pragma: no cover
+                raise RuntimeError(
+                    "flashinfer-python is required to capture cudagraphs for the flashinfer backend."
+                ) from e
+
+            # FlashInfer paged-kv decode metadata buffers (on GPU).
+            # Maximum pages per sequence equals max_num_blocks (kvcache blocks).
+            fi_kv_indptr = torch.empty(max_bs + 1, dtype=torch.int32)
+            fi_kv_last_page_len = torch.empty(max_bs, dtype=torch.int32)
+            fi_kv_indices = torch.empty(max_bs * max_num_blocks, dtype=torch.int32)
+
+            # Shared workspace buffers (match mini-sglang pattern).
+            fi_float_workspace = torch.zeros(128 * 1024 * 1024, dtype=torch.uint8)
+            fi_int_workspace = torch.empty((8 * 1024 * 1024,), dtype=torch.uint8)
+            fi_pin_int_workspace = torch.empty(
+                (8 * 1024 * 1024,), dtype=torch.uint8, pin_memory=True, device="cpu"
+            )
+
+            tp_size = self.world_size
+            num_qo_heads = hf_config.num_attention_heads // tp_size
+            num_kv_heads = hf_config.num_key_value_heads // tp_size
+            head_dim = getattr(
+                hf_config,
+                "head_dim",
+                hf_config.hidden_size // hf_config.num_attention_heads,
+            )
+            use_tensor_cores = (num_qo_heads // num_kv_heads) >= 4
+
+            # Make block 0 deterministic for capture (the dummy page table points at it).
+            try:
+                self.kv_cache[:, :, 0].zero_()
+            except Exception:  # pragma: no cover
+                pass
+
+            # Dummy capture metadata: pretend every request is at max_model_len so the planned
+            # kernel supports the full range (important for tensor-core decode).
+            n_pages = max_num_blocks
+            last_len = config.max_model_len - (n_pages - 1) * self.block_size
+            if not (1 <= last_len <= self.block_size):
+                raise RuntimeError(
+                    f"Invalid last_page_len={last_len} for page_size={self.block_size}, max_model_len={config.max_model_len}."
+                )
+
+            self.fi_graph_wrappers = {}
+            for bs in reversed(self.graph_bs):
+                graph = torch.cuda.CUDAGraph()
+                wrapper = CUDAGraphBatchDecodeWithPagedKVCacheWrapper(
+                    fi_float_workspace,
+                    kv_layout="NHD",
+                    use_tensor_cores=use_tensor_cores,
+                    indptr_buffer=fi_kv_indptr[: bs + 1],
+                    indices_buffer=fi_kv_indices,
+                    last_page_len_buffer=fi_kv_last_page_len[:bs],
+                )
+                wrapper._int_workspace_buffer = fi_int_workspace
+                wrapper._pin_memory_int_workspace_buffer = fi_pin_int_workspace
+                self.fi_graph_wrappers[bs] = wrapper
+
+                indptr_host = torch.arange(
+                    0,
+                    (bs + 1) * n_pages,
+                    step=n_pages,
+                    dtype=torch.int32,
+                    pin_memory=True,
+                    device="cpu",
+                )
+                fi_kv_indices[: bs * n_pages].zero_()
+                last_host = torch.full(
+                    (bs,),
+                    last_len,
+                    dtype=torch.int32,
+                    pin_memory=True,
+                    device="cpu",
+                )
+                wrapper.plan(
+                    indptr=indptr_host,
+                    indices=fi_kv_indices[: bs * n_pages],
+                    last_page_len=last_host,
+                    num_qo_heads=num_qo_heads,
+                    num_kv_heads=num_kv_heads,
+                    head_dim=head_dim,
+                    page_size=self.block_size,
+                    pos_encoding_mode="NONE",
+                    sm_scale=None,
+                    q_data_type=hf_config.torch_dtype,
+                    kv_data_type=hf_config.torch_dtype,
+                    non_blocking=True,
+                )
+
+                set_context(
+                    False,
+                    slot_mapping=slot_mapping[:bs],
+                    attn_backend=self.config.attn_backend,
+                    fi_decode_wrapper=wrapper,
+                    fi_planned=True,
+                )
+                outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # warmup
+                with torch.cuda.graph(graph, self.graph_pool):
+                    outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # capture
+                if self.graph_pool is None:
+                    self.graph_pool = graph.pool()
+                self.graphs[bs] = graph
+                torch.cuda.synchronize()
+                reset_context()
+
+            self.graph_vars = dict(
+                input_ids=input_ids,
+                positions=positions,
+                slot_mapping=slot_mapping,
+                context_lens=context_lens,
+                block_tables=block_tables,
+                outputs=outputs,
+                fi_kv_indptr=fi_kv_indptr,
+                fi_kv_indices=fi_kv_indices,
+                fi_kv_last_page_len=fi_kv_last_page_len,
+            )
+            return
+
         for bs in reversed(self.graph_bs):
             graph = torch.cuda.CUDAGraph()
-            set_context(False, slot_mapping=slot_mapping[:bs], context_lens=context_lens[:bs], block_tables=block_tables[:bs])
+            set_context(
+                False,
+                slot_mapping=slot_mapping[:bs],
+                context_lens=context_lens[:bs],
+                block_tables=block_tables[:bs],
+            )
             outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # warmup
             with torch.cuda.graph(graph, self.graph_pool):
                 outputs[:bs] = self.model(input_ids[:bs], positions[:bs])    # capture

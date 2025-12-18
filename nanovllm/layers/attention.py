@@ -188,6 +188,10 @@ class Attention(nn.Module):
             prefill_wrapper, decode_wrapper = _get_flashinfer_wrappers(
                 q.device.index, use_tensor_cores=(self.num_heads // self.num_kv_heads) >= 4
             )
+            if context.fi_prefill_wrapper is not None:
+                prefill_wrapper = context.fi_prefill_wrapper
+            if context.fi_decode_wrapper is not None:
+                decode_wrapper = context.fi_decode_wrapper
 
             if not context.fi_planned:
                 if context.is_prefill:

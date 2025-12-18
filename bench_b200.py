@@ -39,7 +39,6 @@ def run_benchmark(
     max_num_batched_tokens: int,
     enforce_eager: bool,
     attn_backend: str,
-    fp8_mlp: bool,
     seed: int,
 ) -> dict[str, Any]:
     torch.manual_seed(seed)
@@ -52,7 +51,6 @@ def run_benchmark(
         max_num_seqs=num_seqs,
         max_num_batched_tokens=max_num_batched_tokens,
         attn_backend=attn_backend,
-        fp8_mlp=fp8_mlp,
     )
 
     # Warmup: run a small (but representative) request to trigger compilation/JIT paths.
@@ -108,7 +106,6 @@ def run_benchmark(
             "max_num_batched_tokens": max_num_batched_tokens,
             "enforce_eager": enforce_eager,
             "attn_backend": attn_backend,
-            "fp8_mlp": fp8_mlp,
             "seed": seed,
         },
         "results": {
@@ -134,7 +131,6 @@ def main() -> None:
     p.add_argument("--max-num-batched-tokens", type=int, default=16384)
     p.add_argument("--enforce-eager", action="store_true", help="Disable CUDA graph path.")
     p.add_argument("--attn-backend", type=str, default="auto", help="auto|flashinfer|flashattn")
-    p.add_argument("--fp8-mlp", action="store_true", help="Enable FP8 rowwise scaled MLP matmuls on SM100.")
     p.add_argument("--seed", type=int, default=0)
     p.add_argument("--out", type=str, default="", help="Optional JSON output path.")
     args = p.parse_args()
@@ -148,7 +144,6 @@ def main() -> None:
         max_num_batched_tokens=args.max_num_batched_tokens,
         enforce_eager=args.enforce_eager,
         attn_backend=args.attn_backend,
-        fp8_mlp=args.fp8_mlp,
         seed=args.seed,
     )
 
