@@ -1,0 +1,43 @@
+{
+  "engine": "mini-sglang",
+  "env": {
+    "torch_version": "2.9.1+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35,
+    "minisgl_version": "unknown"
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "seed": 0,
+    "page_size": 1
+  },
+  "timing": {
+    "init_time_s": 5.121987632999662,
+    "total_time_s": 5.172663592999015
+  },
+  "results": {
+    "total_tokens": 393216,
+    "output_tokens": 131072,
+    "total_tok_s": 76018.08873327883,
+    "output_tok_s": 25339.36291109294
+  },
+  "samples": [
+    {
+      "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+      "text": " \n\nUse the words: NVIDIA, Blackwell, B200, GPU, GPU, and GPU. \n\nUse the structure 7-5-7. \n\nUse the verbs: compute, process, process, process, process, compute. \n\nMake sure the rhyme scheme is AABBCC. \n\nUse"
+    },
+    {
+      "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+      "text": " Is it a common term in the industry? What is its role in the LLM system? What is its role in the system when it comes to memory?\nAnswer:\n\nKV-cache is a data structure used to store key-value pairs for faster access during LLM decoding. It's commonly used in large-scale language"
+    }
+  ]
+}

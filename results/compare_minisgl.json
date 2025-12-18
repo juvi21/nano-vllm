@@ -1,0 +1,43 @@
+{
+  "engine": "mini-sglang",
+  "env": {
+    "torch_version": "2.9.0+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35,
+    "minisgl_version": "unknown"
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "seed": 0,
+    "page_size": 1
+  },
+  "timing": {
+    "init_time_s": 14.7133757470001,
+    "total_time_s": 6.272622180000326
+  },
+  "results": {
+    "total_tokens": 393216,
+    "output_tokens": 131072,
+    "total_tok_s": 62687.65895923602,
+    "output_tok_s": 20895.88631974534
+  },
+  "samples": [
+    {
+      "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+      "text": " \n\n**H**\n\nAnd so it begins to burn, \n\n**G**\n\nIn the code, the heat is measured \n\n**L**\n\nIn the code, the heat is measured \n\n**E**\n\nIn the code, the heat is measured \n\n**S**\n\nIn the code, the heat is measured \n\n**T"
+    },
+    {
+      "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+      "text": " Is the answer correct? Also, explain in 2 sentences why the answer is correct??\n\n**A.**  \n**B.**  \n**C.**  \n**D.**  \n**Answer: A**  \n**Explanation:**  \n**A.**  \nKV-cache is used to store the knowledge"
+    }
+  ]
+}

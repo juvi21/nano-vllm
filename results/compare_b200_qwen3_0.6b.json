@@ -1,0 +1,145 @@
+{
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "attn_backend": "flashinfer",
+    "seed": 0
+  },
+  "results": {
+    "nanovllm": {
+      "engine": "nano-vllm",
+      "env": {
+        "torch_version": "2.9.0+cu128",
+        "torch_cuda_version": "12.8",
+        "cuda_available": true,
+        "device_name": "NVIDIA B200",
+        "device_capability": "10.0",
+        "sm_count": 148,
+        "total_mem_gb": 178.35
+      },
+      "config": {
+        "model": "/root/huggingface/Qwen3-0.6B",
+        "num_seqs": 256,
+        "prompt_len": 1024,
+        "max_tokens": 512,
+        "max_model_len": 2048,
+        "max_num_batched_tokens": 16384,
+        "attn_backend": "flashinfer",
+        "seed": 0
+      },
+      "timing": {
+        "init_time_s": 3.1371320629987167,
+        "total_time_s": 20.995867617999465
+      },
+      "results": {
+        "prefill_tokens": 262400,
+        "prefill_time_s": 14.772748509003577,
+        "prefill_tok_s": 17762.43600438162,
+        "decode_tokens": 130816,
+        "decode_time_s": 6.2205916429411445,
+        "decode_tok_s": 21029.51093863303,
+        "total_tok_s": 18728.256776724073,
+        "output_tok_s": 6230.559383402345
+      },
+      "samples": [
+        {
+          "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+          "text": " It should include the term \"GPU\" and the \"Tesla\" brand name.\nAnswer:\nThe NVIDIA Blackwell B200 GPU is a powerful workstation processor with Tesla's famous computing architecture.\n\n**Step 1:** Identify the key elements of the haiku. A haiku typically has 5-7-5"
+        },
+        {
+          "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+          "text": " 2 sentences. 2 sentences.\nAnswer:\nKV-cache is a cache that stores the key-value pairs from the pre-trained language model, which allows the model to quickly look up and retrieve the required information during decoding. The cache helps to reduce the time needed to access the model's knowledge, improving the efficiency of the"
+        }
+      ]
+    },
+    "minisgl": {
+      "engine": "mini-sglang",
+      "env": {
+        "torch_version": "2.9.0+cu128",
+        "torch_cuda_version": "12.8",
+        "cuda_available": true,
+        "device_name": "NVIDIA B200",
+        "device_capability": "10.0",
+        "sm_count": 148,
+        "total_mem_gb": 178.35,
+        "minisgl_version": "unknown"
+      },
+      "config": {
+        "model": "/root/huggingface/Qwen3-0.6B",
+        "num_seqs": 256,
+        "prompt_len": 1024,
+        "max_tokens": 512,
+        "max_model_len": 2048,
+        "max_num_batched_tokens": 16384,
+        "seed": 0,
+        "page_size": 1
+      },
+      "timing": {
+        "init_time_s": 14.7133757470001,
+        "total_time_s": 6.272622180000326
+      },
+      "results": {
+        "total_tokens": 393216,
+        "output_tokens": 131072,
+        "total_tok_s": 62687.65895923602,
+        "output_tok_s": 20895.88631974534
+      },
+      "samples": [
+        {
+          "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+          "text": " \n\n**H**\n\nAnd so it begins to burn, \n\n**G**\n\nIn the code, the heat is measured \n\n**L**\n\nIn the code, the heat is measured \n\n**E**\n\nIn the code, the heat is measured \n\n**S**\n\nIn the code, the heat is measured \n\n**T"
+        },
+        {
+          "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+          "text": " Is the answer correct? Also, explain in 2 sentences why the answer is correct??\n\n**A.**  \n**B.**  \n**C.**  \n**D.**  \n**Answer: A**  \n**Explanation:**  \n**A.**  \nKV-cache is used to store the knowledge"
+        }
+      ]
+    },
+    "vllm": {
+      "engine": "vllm",
+      "env": {
+        "torch_version": "2.9.0+cu128",
+        "torch_cuda_version": "12.8",
+        "cuda_available": true,
+        "device_name": "NVIDIA B200",
+        "device_capability": "10.0",
+        "sm_count": 148,
+        "total_mem_gb": 178.35,
+        "vllm_version": "0.12.0"
+      },
+      "config": {
+        "model": "/root/huggingface/Qwen3-0.6B",
+        "num_seqs": 256,
+        "prompt_len": 1024,
+        "max_tokens": 512,
+        "max_model_len": 2048,
+        "max_num_batched_tokens": 16384,
+        "seed": 0
+      },
+      "timing": {
+        "init_time_s": 17.329929408999305,
+        "total_time_s": 6.9671682990010595
+      },
+      "results": {
+        "total_tokens": 393216,
+        "output_tokens": 131072,
+        "total_tok_s": 56438.424209786725,
+        "output_tok_s": 18812.80806992891
+      },
+      "samples": [
+        {
+          "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+          "text": " Focus on the aspect of the GPU's performance. The haiku must have a 5-7-5 structure. The haiku should be in English, and the last line should be a question.\nAnswer:\n\nNVIDIA's Blackwell B200, a powerhouse,  \nWith blazing performance, decoding power."
+        },
+        {
+          "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+          "text": " Explain in 2 sentences what is a cache in a computer system.\nAnswer:\n\nKV-cache is a cache used in large language models to store previous generated tokens, improving decoding efficiency. A cache in a computer system is a temporary storage of data to speed up processing and retrieval.\n\n**Explanation in 2 sentences:**\n\n1"
+        }
+      ]
+    }
+  }
+}

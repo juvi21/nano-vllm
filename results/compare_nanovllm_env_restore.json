@@ -1,0 +1,46 @@
+{
+  "engine": "nano-vllm",
+  "env": {
+    "torch_version": "2.9.1+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "attn_backend": "flashinfer",
+    "seed": 0
+  },
+  "timing": {
+    "init_time_s": 1.9152932450015214,
+    "total_time_s": 7.132084991000738
+  },
+  "results": {
+    "prefill_tokens": 262400,
+    "prefill_time_s": 0.8292090890026884,
+    "prefill_tok_s": 316446.12134630047,
+    "decode_tokens": 130816,
+    "decode_time_s": 6.299903604001884,
+    "decode_tok_s": 20764.762165075324,
+    "total_tok_s": 55133.38672998987,
+    "output_tok_s": 18341.90144467762
+  },
+  "samples": [
+    {
+      "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+      "text": " It should include the term \"GPU\" and the \"Tesla\" brand name.\nAnswer:\nThe NVIDIA Blackwell B200 GPU is a powerful workstation processor with Tesla's famous computing architecture.\n\n**Step 1:** Identify the key elements of the haiku. A haiku typically has 5-7-5"
+    },
+    {
+      "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+      "text": " 2 sentences. 2 sentences.\nAnswer:\nKV-cache is a cache that stores the key-value pairs from the pre-trained language model, which allows the model to quickly look up and retrieve the required information during decoding. The cache helps to reduce the time needed to access the model's knowledge, improving the efficiency of the"
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+{
+  "engine": "vllm",
+  "env": {
+    "torch_version": "2.9.0+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35,
+    "vllm_version": "0.12.0"
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "seed": 0
+  },
+  "timing": {
+    "init_time_s": 40.52812094000183,
+    "total_time_s": 7.154041125999356
+  },
+  "results": {
+    "total_tokens": 393216,
+    "output_tokens": 131072,
+    "total_tok_s": 54964.17941615778,
+    "output_tok_s": 18321.393138719257
+  },
+  "samples": [
+    {
+      "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+      "text": " Focus on the aspect of the GPU's performance. The haiku should have a 5-7-5 structure. The haiku should be in English, and the last line should be a question.\nAnswer:\n\nNVIDIA's Blackwell B200, a powerhouse,  \nWith blazing performance, decoding power."
+    },
+    {
+      "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+      "text": " Explain in 2 sentences what is a cache in a computer system.\nAnswer:\n\nKV-cache is a cache used in large language models to store previous generated tokens, improving decoding efficiency. A cache in a computer system is a temporary storage of data to speed up processing and retrieval.\n\n**Explanation in 2 sentences:**\n\n1"
+    }
+  ]
+}

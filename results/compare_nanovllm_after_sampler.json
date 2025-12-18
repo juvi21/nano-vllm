@@ -1,0 +1,46 @@
+{
+  "engine": "nano-vllm",
+  "env": {
+    "torch_version": "2.9.1+cu128",
+    "torch_cuda_version": "12.8",
+    "cuda_available": true,
+    "device_name": "NVIDIA B200",
+    "device_capability": "10.0",
+    "sm_count": 148,
+    "total_mem_gb": 178.35
+  },
+  "config": {
+    "model": "/root/huggingface/Qwen3-0.6B",
+    "num_seqs": 256,
+    "prompt_len": 1024,
+    "max_tokens": 512,
+    "max_model_len": 2048,
+    "max_num_batched_tokens": 16384,
+    "attn_backend": "flashinfer",
+    "seed": 0
+  },
+  "timing": {
+    "init_time_s": 2.7171587990014814,
+    "total_time_s": 5.683632165000745
+  },
+  "results": {
+    "prefill_tokens": 262400,
+    "prefill_time_s": 0.48772392100363504,
+    "prefill_tok_s": 538009.2890667225,
+    "decode_tokens": 130816,
+    "decode_time_s": 5.193925452975236,
+    "decode_tok_s": 25186.34531519213,
+    "total_tok_s": 69183.92826710109,
+    "output_tok_s": 23016.26780240147
+  },
+  "samples": [
+    {
+      "prompt": "Write a short haiku about NVIDIA Blackwell B200.",
+      "text": " Use the first person perspective of a user, and the haiku should be in 3 lines. The haiku should include the following words: \"GPU\" and \"compute\" and \"power\" and \"compute\" in the first line, and \"power\" and \"compute\" in the second line. The third"
+    },
+    {
+      "prompt": "Explain in 2 sentences what KV-cache is for LLM decoding.",
+      "text": " Include the term \"knowledge\" and \"truth\" in your response.\nAnswer:\n\nKV-cache is used to store a latent code that contains knowledge about the current context and the relevant information. It helps in reducing the decoding process by providing access to the necessary information. The term \"knowledge\" and \"truth\" are included in"
+    }
+  ]
+}
