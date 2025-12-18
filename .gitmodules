@@ -1,0 +1,6 @@
+[submodule "third_party/mini-sglang"]
+	path = third_party/mini-sglang
+	url = https://github.com/sgl-project/mini-sglang.git
+[submodule "third_party/nmoe"]
+	path = third_party/nmoe
+	url = https://github.com/Noumena-Network/nmoe.git

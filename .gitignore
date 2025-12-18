@@ -195,4 +195,7 @@ cython_debug/
 .cursorindexingignore
 
 # Repo-specific
-third_party/
+# Keep large vendored deps out of the main repo (submodules are tracked separately).
+third_party/*
+!third_party/mini-sglang/
+!third_party/nmoe/
